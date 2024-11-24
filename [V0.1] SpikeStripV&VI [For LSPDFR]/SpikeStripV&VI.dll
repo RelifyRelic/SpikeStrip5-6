@@ -1,0 +1,132 @@
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+using Rage;
+using Rage.Native;
+
+[assembly: Rage.Attributes.Plugin("Spike Strips Mod", Description = "Deploy spike strips during pursuits.", Author = "YourName")]
+
+namespace SpikeStripsMod
+{
+    public class Main : Plugin
+    {
+        private static Vector3 spikeLocation;
+        private static Blip spikeBlip;
+        private static bool spikeDeployed = false;
+
+        public override void Initialize()
+        {
+            Game.LogTrivial("Spike Strips Mod loaded.");
+            Game.DisplayNotification("Spike Strips Mod ~g~initialized~s~. Press ~b~F5~s~ to deploy spike strips.");
+            BindKeys();
+        }
+
+        public override void Finally()
+        {
+            Game.LogTrivial("Spike Strips Mod cleaned up.");
+        }
+
+        private void BindKeys()
+        {
+            GameFiber.StartNew(() =>
+            {
+                while (true)
+                {
+                    GameFiber.Yield();
+                    
+                    // Deploy spikes (Default: F5)
+                    if (Game.IsKeyDown(System.Windows.Forms.Keys.F5))
+                    {
+                        DeploySpikes();
+                    }
+
+                    // Clean up spikes (Default: F6)
+                    if (Game.IsKeyDown(System.Windows.Forms.Keys.F6))
+                    {
+                        CleanUpSpikes();
+                    }
+                }
+            });
+        }
+
+        private void DeploySpikes()
+        {
+            if (spikeDeployed)
+            {
+                Game.DisplayNotification("~r~Spike strips are already deployed!");
+                return;
+            }
+
+            // Get the waypoint location
+            if (Game.LocalPlayer.Character.IsInAnyVehicle(false) && Game.IsWaypointActive)
+            {
+                spikeLocation = World.GetWaypointPosition();
+                spikeBlip = new Blip(spikeLocation)
+                {
+                    Color = Color.Red,
+                    Scale = 1.0f,
+                    Name = "Spike Strips"
+                };
+
+                spikeDeployed = true;
+                Game.DisplayNotification("~g~Spike strips deployed! Suspect will drive to the location.");
+                GameFiber.StartNew(MoveSuspectToSpikeLocation);
+            }
+            else
+            {
+                Game.DisplayNotification("~r~You must set a waypoint and be in a vehicle to deploy spikes.");
+            }
+        }
+
+        private void MoveSuspectToSpikeLocation()
+        {
+            GameFiber.Sleep(5000); // Wait 5 seconds
+            Ped suspect = GetPursuedSuspect();
+            
+            if (suspect != null)
+            {
+                Vehicle suspectVehicle = suspect.CurrentVehicle;
+
+                if (suspectVehicle != null && suspectVehicle.Exists())
+                {
+                    suspectVehicle.Tasks.DriveToPosition(spikeLocation, 30.0f, VehicleDrivingFlags.None);
+                    Game.DisplayNotification("~o~Suspect is heading to the spike strip location.");
+                    GameFiber.Sleep(3000); // Allow time to hit spikes
+                    
+                    // Simulate spike effect
+                    NativeFunction.Natives.SET_VEHICLE_TYRE_BURST(suspectVehicle, 0, true, 1000.0f); // Front-left
+                    NativeFunction.Natives.SET_VEHICLE_TYRE_BURST(suspectVehicle, 1, true, 1000.0f); // Front-right
+                    Game.DisplayNotification("~g~Suspect's tires have been spiked!");
+                }
+            }
+            else
+            {
+                Game.DisplayNotification("~r~No pursued suspect found.");
+            }
+
+            CleanUpSpikes();
+        }
+
+        private Ped GetPursuedSuspect()
+        {
+            foreach (Ped ped in World.GetAllPeds())
+            {
+                if (ped.IsSuspect() && ped.IsInAnyVehicle(false))
+                {
+                    return ped;
+                }
+            }
+            return null;
+        }
+
+        private void CleanUpSpikes()
+        {
+            if (spikeBlip != null && spikeBlip.Exists())
+            {
+                spikeBlip.Delete();
+            }
+            spikeDeployed = false;
+            Game.DisplayNotification("~b~Spike strips have been cleaned up.");
+        }
+    }
+}
